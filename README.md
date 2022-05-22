@@ -26,6 +26,7 @@ The following IEEE 1800.2 sections have been implemented:
 |12|UVM TLM Interfaces|Fully implemented|
 |13|Predefined Component Classes|Implements uvm_component with hierarchy, uvm_root singleton,run_test(), simplified ConfigDB, uvm_driver, etc|
 |14 & 15|Sequences, sequencer, sequence_item|Refactored sequencer functionality leveraging Python language capabilities. Simpler and more direct implementation|
+|18 & 26| RAL: reg_block, reg_field, reg_item, reg_mem, reg_adapter, reg_map| RAL main components for register modellinmg. Customizations are included into the s24 file|
 
 
 ## Installation
