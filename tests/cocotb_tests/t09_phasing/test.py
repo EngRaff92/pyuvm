@@ -4,42 +4,44 @@ from pyuvm import *
 import inspect
 
 phase_list = {}
+
+
 class my_comp(uvm_component):
-        def log_phase(self):
-            """
-            Log this function to the phase list
-            """
-            comp_name = self.get_name()
-            function_name = inspect.stack()[1][3]
+    def log_phase(self):
+        """
+        Log this function to the phase list
+        """
+        comp_name = self.get_name()
+        function_name = inspect.stack()[1][3]
+        phase_list[function_name].append(comp_name)
 
-            phase_list[function_name].append(comp_name)
+    def build_phase(self):
+        self.log_phase()
 
-        def build_phase(self):
-            self.log_phase()
+    def connect_phase(self):
+        self.log_phase()
 
-        def connect_phase(self):
-            self.log_phase()
+    def end_of_elaboration_phase(self):
+        self.log_phase()
 
-        def end_of_elaboration_phase(self):
-            self.log_phase()
+    def start_of_simulation_phase(self):
+        self.log_phase()
 
-        def start_of_simulation_phase(self):
-            self.log_phase()
+    async def run_phase(self):
+        self.log_phase()
 
-        async def run_phase(self):
-            self.log_phase()
+    def extract_phase(self):
+        self.log_phase()
 
-        def extract_phase(self):
-            self.log_phase()
+    def check_phase(self):
+        self.log_phase()
 
-        def check_phase(self):
-            self.log_phase()
+    def report_phase(self):
+        self.log_phase()
 
-        def report_phase(self):
-            self.log_phase()
+    def final_phase(self):
+        self.log_phase()
 
-        def final_phase(self):
-            self.log_phase()
 
 def setUp():
     for phase_class in uvm_common_phases:
@@ -61,9 +63,11 @@ def setUp():
     my_comp("ff", bb)
     return top
 
+
 def tearDown():
     uvm_root().clear_hierarchy()
-        
+
+
 class my_test(uvm_test):
     async def run_phase(self):
         self.raise_objection()
@@ -77,6 +81,7 @@ async def run_test(dut):
     await uvm_root().run_test("my_test")
     assert True
 
+
 @cocotb.test()
 async def test_stub(dut):
     """testing the basic testing mechanism"""
@@ -84,6 +89,7 @@ async def test_stub(dut):
     top.build_phase()
     assert "top" == phase_list["build_phase"][0]
     tearDown()
+
 
 async def test_traverse():
     top = setUp()
@@ -113,11 +119,8 @@ async def test_traverse():
     tearDown()
     return True
 
+
 @cocotb.test()
 async def traverse(self):
     """Testing topdown and bottom up traversal"""
     assert await test_traverse()
-
-
-
-

@@ -1,29 +1,17 @@
 from pyuvm.s06_reporting_classes import uvm_report_object
 from pyuvm.s08_factory_classes import uvm_factory
 from pyuvm.s09_phasing import uvm_common_phases, uvm_run_phase, uvm_build_phase
-from pyuvm import error_classes
+from pyuvm import error_classes, INFO
 from pyuvm import utility_classes
 import logging
 import fnmatch
 import string
+from cocotb.log import SimColourLogFormatter, SimTimeContextFilter
 
 
+# 13.1.1
 class uvm_component(uvm_report_object):
-    """13.1.1 Class Declaration
 
-The specification calls for uvm_component to extend
-uvm_report_object. However, pyuvm uses the logging
-module orthogonally to class structure. It may be
-that in future we find a reason to wrap the basic
-logging package in the uvm code, but at this point we are
-better off leaving logging to itself.
-
-The choice then becomes whether to create a
-uvm_report_object class as a placeholder to preserve
-the UVM reference manual hierarchy or to code what
-is really going on.  We've opted for the latter.
-
-    """
     component_dict = {}
 
     @classmethod
@@ -310,10 +298,15 @@ is really going on.  We've opted for the latter.
         for child in self.children:
             child.remove_logging_handler_hier(handler)
 
-    def set_formatter_on_handlers_hier(self, formatter):
-        self.set_formatter_on_handlers(formatter)
+    def remove_streaming_handler_hier(self):
+        self.remove_streaming_handler()
         for child in self.children:
-            child.set_formatter_on_handlers_hier(formatter)
+            child.remove_streaming_handler_hier()
+
+    def disable_logging_hier(self):
+        self.disable_logging()
+        for child in self.children:
+            child.disable_logging_hier()
 
     def build_phase(self):
         ...
@@ -356,6 +349,13 @@ is really going on.  We've opted for the latter.
     """
 
 
+# 13.2 (rest of 13.2 is in s13_predefined_components)
+class uvm_test(uvm_component):
+    """
+        The base class for all tests
+    """
+
+
 class uvm_root(uvm_component, metaclass=utility_classes.UVM_ROOT_Singleton):
     """
     F.7.  We do not use uvm_pkg to hold uvm_root.  Instead it
@@ -373,8 +373,9 @@ class uvm_root(uvm_component, metaclass=utility_classes.UVM_ROOT_Singleton):
     """
 
     @classmethod
-    def clear_singletons(cls):
-        cls.singleton = None
+    def clear_singletons(cls, keep_set={}):
+        keepers = {uvm_factory, utility_classes.FactoryData}.union(keep_set)
+        utility_classes.Singleton.clear_singletons(keep=keepers)
 
     def __init__(self):
         super().__init__("uvm_root", None)
@@ -385,27 +386,34 @@ class uvm_root(uvm_component, metaclass=utility_classes.UVM_ROOT_Singleton):
         """Used in testing"""
         return self.get_child("uvm_test_top")
 
-    async def run_test(self, test_name=""):
+# This implementation skips much of the state-setting and
+# what not in the LRM and focuses on building the
+# hierarchy and running the test.
+
+# At this time pyuvm has not implemented the phasing
+# system described in the LRM.  It's not clear that anyone
+# is using it, and in fact it is recommended that people
+# stick to the basic phases.  So this implementation loops
+# through the hierarchy and runs the phases.
+    async def run_test(self, test_name, keep_singletons=False, keep_set=set()):
         """
-        This implementation skips much of the state-setting and
-        what not in the LRM and focuses on building the
-        hierarchy and running the test.
-
-        At this time pyuvm has not implemented the phasing
-        system described in the LRM.  It's not clear that anyone
-        is using it, and in fact it is recommended that people
-        stick to the basic phases.  So this implementation loops
-        through the hierarchy and runs the phases.
-
-        :param test_name: The uvm test name
+        :param test_name: The uvm test name or test class
+        :param keep_singletons: If True do not clear singletons (default False)
+        :param keep_set: Set of singleton classes to keep
         :return: none
         """
-
         factory = uvm_factory()
+        if not keep_singletons:
+            uvm_report_object.set_default_logging_level(INFO)
+            self.clear_singletons(keep_set)
+            factory.clear_overrides()
         self.clear_children()
+        utility_classes.ObjectionHandler().clear()
         self.uvm_test_top = factory.create_component_by_name(
             test_name, "", "uvm_test_top", self)
         for self.running_phase in uvm_common_phases:
+            self.logger.log(utility_classes.PYUVM_DEBUG,
+                            str(self.running_phase))
             self.running_phase.traverse(self.uvm_test_top)
             if self.running_phase == uvm_run_phase:
                 await utility_classes.ObjectionHandler().run_phase_complete()  # noqa: E501
@@ -447,12 +455,25 @@ class ConfigDB(metaclass=utility_classes.Singleton):
     # at this time.
 
     def __init__(self):
+        self.logger_holder = uvm_report_object("logger_holder")
+        self.logger_holder.remove_streaming_handler()
+        configdb_handler = logging.StreamHandler()
+        configdb_handler.addFilter(SimTimeContextFilter())
+        # Don't let the handler interfere with logger level
+        configdb_handler.setLevel(logging.NOTSET)
+        # Make log messages look like UVM messages
+        configdb_formatter = SimColourLogFormatter()
+        configdb_handler.setFormatter(configdb_formatter)
+        self.logger_holder.add_logging_handler(configdb_handler)
+        self.logger_holder.logger.propagate = False
         self._path_dict = {}
         self.is_tracing = False
         self._cond_dict = {}
 
     def clear(self):
         """Reset the ConfigDB. Used for testing."""
+        if self.is_tracing:
+            self.logger_holder.logger.info("CFGDB/CLEAR: Clearing ConfigDB()")
         self._path_dict = {}
 
     @staticmethod
@@ -478,23 +499,23 @@ class ConfigDB(metaclass=utility_classes.Singleton):
     def trace(self, method, context, inst_name, field_name, value):
         if self.is_tracing:
             # noinspection SpellCheckingInspection
-            print(f"CFGDB/{method} Context: {context}  --  {inst_name} {field_name}={value}")  # noqa: E501
+            self.logger_holder.logger.info(f"CFGDB/{method} Context: {context}  --  {inst_name} {field_name}={value}")  # noqa: E501
 
     def set(self, context, inst_name, field_name, value):
         """
         Stores an object in the db using the context and
-        inst_name to create a retrieval path, and the field
+        inst_name to create a retrieval path, and the key
         name.
         :param context: A handle to a component
         :param inst_name: The instance name within the component
-        :param field_name: The field we're setting
+        :param field_name: The key we're setting
         :param value: The object to be stored
         :return: None
         """
 
         if not set(field_name).issubset(self.legal_chars):
             raise error_classes.UVMNotImplemented(
-                f"pyuvm does not allow wildcards in field names ({field_name})"
+                f"pyuvm does not allow wildcards in key names ({field_name})"
             )
 
         context, inst_name = self._get_context_inst_name(context, inst_name)
@@ -541,11 +562,11 @@ class ConfigDB(metaclass=utility_classes.Singleton):
 
         except TypeError:
             raise error_classes.UVMConfigItemNotFound(
-                f'"{inst_name}" is not a in ConfigDB().')
+                f'"{inst_name}" is not in ConfigDB().')
         finally:
             if len(key_matches) == 0:
                 raise error_classes.UVMConfigItemNotFound(
-                    f'"{inst_name}" is not a in ConfigDB().')
+                    f'"{inst_name}" is not in ConfigDB().')
         # Here we sort the list of paths by which paths are "in" other
         # paths. That is A comes before '*'  A.B comes before A.*, etc.
         # We use an insertion sort. A path is inserted in front of the
@@ -583,14 +604,14 @@ class ConfigDB(metaclass=utility_classes.Singleton):
             return value
         else:
             raise error_classes.UVMConfigItemNotFound(
-                f'"Component {inst_name} has no field: {field_name}')
+                f'"Component {inst_name} has no key: {field_name}')
 
     def exists(self, context, inst_name, field_name):
         """
         Returns true if there is data in the database at this location
         :param context: None or uvm_component
         :param inst_name: instance name string in context
-        :param field_name: field name for location
+        :param field_name: key name for location
         :return: True if exists
         """
         try:
@@ -604,8 +625,8 @@ class ConfigDB(metaclass=utility_classes.Singleton):
             "wait_modified not implemented pending requests for it.")
 
     def __str__(self):
-        str_list = [f"\n{'PATH':20}: {'FIELD':10}: {'DATA':30}"]
+        str_list = [f"\n{'PATH':20}: {'KEY':10}: {'DATA':30}"]
         for inst_path in self._path_dict:
-            for field in self._path_dict[inst_path]:
-                str_list.append(f"{inst_path:20}: {field:10}: {self._path_dict[inst_path][field]}")  # noqa: E501
+            for key in self._path_dict[inst_path]:
+                str_list.append(f"{inst_path:20}: {key:10}: {self._path_dict[inst_path][key]}")  # noqa: E501
         return "\n".join(str_list)

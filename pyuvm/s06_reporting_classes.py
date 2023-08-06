@@ -8,30 +8,60 @@
 
 from pyuvm.s05_base_classes import uvm_object
 import logging
+import sys
+from cocotb.log import SimTimeContextFilter
+from cocotb.log import SimLogFormatter, SimColourLogFormatter
+from cocotb.utils import want_color_output
+from logging import DEBUG, CRITICAL, ERROR, WARNING, INFO, NOTSET, NullHandler   # noqa: F401, E501
+
+
+class PyuvmFormatter(SimColourLogFormatter):
+    def __init__(self, full_name):
+        self.full_name = full_name
+        super().__init__()
+
+    def format(self, record):
+        new_msg = f"[{self.full_name}]: {record.msg}"
+        record.msg = new_msg
+        name_temp = record.name
+        record.name = f"{record.pathname}({record.lineno})"
+        if want_color_output():
+            formatted_msg = super().format(record)
+        else:
+            formatted_msg = SimLogFormatter.format(self, record)
+        record.name = name_temp
+        return formatted_msg
 
 
 # 6.2.1
 class uvm_report_object(uvm_object):
+    __default_logging_level = logging.INFO
     """ The basis of all classes that can report """
-
     def __init__(self, name):
         super().__init__(name)
         uvm_root_logger = logging.getLogger('uvm')
         # Every object gets its own logger
         logger_name = self.get_full_name() + str(id(self))
         self.logger = uvm_root_logger.getChild(logger_name)
-        self.logger.setLevel(level=logging.INFO)  # Default is to print INFO
+        self.logger.setLevel(
+            level=uvm_report_object.get_default_logging_level())
         # We are not sending log messages up the hierarchy
         self.logger.propagate = False
-        handler = logging.StreamHandler()
+        self._streaming_handler = logging.StreamHandler(sys.stdout)
+        self._streaming_handler.addFilter(SimTimeContextFilter())
         # Don't let the handler interfere with logger level
-        handler.setLevel(logging.NOTSET)
+        self._streaming_handler.setLevel(logging.NOTSET)
         # Make log messages look like UVM messages
-        formatter = logging.Formatter(
-            "%(levelname)s: %(filename)s(%(lineno)d)[" + self.get_full_name() + "]: %(message)s")  # noqa: E501
-        handler.setFormatter(formatter)
-        self.add_logging_handler(handler)
-        pass
+        self._uvm_formatter = PyuvmFormatter(self.get_full_name())
+        self.add_logging_handler(self._streaming_handler)
+
+    @staticmethod
+    def set_default_logging_level(default_logging_level):
+        uvm_report_object.__default_logging_level = default_logging_level
+
+    @staticmethod
+    def get_default_logging_level():
+        return uvm_report_object.__default_logging_level
 
     def set_logging_level(self, logging_level):
         """ Sets the logger level """
@@ -41,6 +71,9 @@ class uvm_report_object(uvm_object):
         """ Adds a handler """
         assert isinstance(handler, logging.Handler), \
             f"You must pass a logging.Handler not {type(handler)}"
+        if handler.formatter is None:
+            handler.addFilter(SimTimeContextFilter())
+            handler.setFormatter(self._uvm_formatter)
         self.logger.addHandler(handler)
 
     def remove_logging_handler(self, handler):
@@ -49,9 +82,9 @@ class uvm_report_object(uvm_object):
             f"You must pass a logging.Handler not {type(handler)}"
         self.logger.removeHandler(handler)
 
-    def set_formatter_on_handlers(self, formatter):
-        """ Set an identical formatter on all handlers """
-        assert isinstance(formatter, logging.Formatter), \
-            f"You must pass a logging.Formatter not {type(formatter)}"
-        for handler in self.logger.handlers:
-            handler.setFormatter(formatter)
+    def remove_streaming_handler(self):
+        self.logger.removeHandler(self._streaming_handler)
+
+    def disable_logging(self):
+        self.remove_streaming_handler()
+        self.add_logging_handler(NullHandler())

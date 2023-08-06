@@ -35,6 +35,7 @@ class s08_factory_classes_TestCase():
 
     def setUp(self):
         self.fd = utility_classes.FactoryData()
+        uvm_root().clear_children()
         self.top = uvm_component("top", None)
         self.mid = uvm_component("mid", self.top)
         self.sib = uvm_component("sib", self.top)
@@ -272,10 +273,14 @@ class s08_factory_classes_TestCase():
         logger = logging.getLogger("Factory")
         level = logger.level
         logger.setLevel(logging.CRITICAL)
-        not_an_instance = self.factory.create_object_by_name("not_an_object", name="bad_name")
-        assert not_an_instance is None
+        saw_error = False
+        try:
+            _ = self.factory.create_object_by_name("not_an_object", name="bad_name")
+        except UVMFactoryError:
+            saw_error = True
+        assert saw_error
         logger.setLevel(level)
-        
+
     def test_create_component_by_type_and_name_override_8_3_1_5(self):
         """
         8.3.1.5
@@ -363,11 +368,11 @@ class s08_factory_classes_TestCase():
         self.factory.set_inst_override_by_name("original_comp", "comp_2", "top.sib.orig")
         self.factory.set_inst_override_by_name("original_comp", "comp_3", "top.mid.orig")
         self.factory.set_inst_override_by_type(self.original_object, self.object_1, "label")
-        self.factory.all_types = 0
+        self.factory.debug_level = 0
         ss0 = self.factory.__str__()
-        self.factory.all_types = 1
+        self.factory.debug_level = 1
         ss1 = self.factory.__str__()
-        self.factory.all_types = 2
+        self.factory.debug_level = 2
         ss2 = self.factory.__str__()
         # Testing for the actual strings will cause errors as classes change due to
         # other tests being run. This catches the basic functionality.
@@ -417,7 +422,7 @@ class s08_factory_classes_TestCase():
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("Test")
+        await uvm_root().run_test("Test", keep_singletons=True)
         utt = uvm_root()._utt()
         assert isinstance(utt.cc, Other)
 
@@ -440,7 +445,7 @@ class s08_factory_classes_TestCase():
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("Test")
+        await uvm_root().run_test("Test", keep_singletons=True)
         utt = uvm_root()._utt()
         assert isinstance(utt.cc1, Comp)
         assert isinstance(utt.cc2, Other)
@@ -463,7 +468,7 @@ class s08_factory_classes_TestCase():
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("Test")
+        await uvm_root().run_test("Test", keep_singletons=True)
         utt = uvm_root()._utt()
         assert isinstance(utt.cc1, Comp)
         assert isinstance(utt.cc2, Other)
@@ -486,7 +491,7 @@ class s08_factory_classes_TestCase():
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("Test")
+        await uvm_root().run_test("Test", keep_singletons=True)
         utt = uvm_root()._utt()
         assert isinstance(utt.cc1, Other)
         assert isinstance(utt.cc2, Other)
@@ -508,7 +513,7 @@ class s08_factory_classes_TestCase():
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("Test")
+        await uvm_root().run_test("Test", keep_singletons=True)
         utt = uvm_root()._utt()
         assert isinstance(utt.cc1, OtherObj)
 
@@ -530,7 +535,7 @@ class s08_factory_classes_TestCase():
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("Test")
+        await uvm_root().run_test("Test", keep_singletons=True)
         utt = uvm_root()._utt()
         assert isinstance(utt.cc1, OtherObj)
 
@@ -551,6 +556,6 @@ class s08_factory_classes_TestCase():
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("Test")
+        await uvm_root().run_test("Test", keep_singletons=True)
         utt = uvm_root()._utt()
         assert isinstance(utt.cc1, Obj)  # Cant inst override object

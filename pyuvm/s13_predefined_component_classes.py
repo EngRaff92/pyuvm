@@ -38,17 +38,14 @@ class uvm_active_passive_enum(IntEnum):
 # 13.2
 class uvm_test(uvm_component):
     """
-    The base class for all user-defined tests
-
-    Python does not require that we override new() for every
-    UVM class, so we don't do that (same for __init__).
+    The base class for all tests
     """
 
 
 # 13.3
 class uvm_env(uvm_component):
     """
-    The user's contains for agents and what-not
+    A container for agents and what-not
     """
 
 
@@ -96,7 +93,6 @@ class uvm_driver(uvm_component):
     def __init__(self, name, parent):
         super().__init__(name, parent)
         self.seq_item_port = uvm_seq_item_port("seq_item_port", self)
-        pass
 
 
 # 13.8 uvm_push_driver
@@ -105,5 +101,22 @@ class uvm_driver(uvm_component):
 
 
 # 13.9
-class uvm_subscriber(uvm_analysis_export):
-    ...
+class uvm_subscriber(uvm_component):
+    class uvm_AnalysisImp(uvm_analysis_export):
+        def __init__(self, name, parent, write_fn):
+            super().__init__(name, parent)
+            self.write_fn = write_fn
+
+        def write(self, tt):
+            self.write_fn(tt)
+
+    def __init__(self, name, parent):
+        super().__init__(name, parent)
+        self.analysis_export = self.uvm_AnalysisImp("analysis_export",
+                                                    self,
+                                                    self.write)
+
+    def write(self, tt):
+        raise error_classes.UVMFatalError(
+            "You must override the write() method in"
+            f"uvm_subscriber {self.get_full_name()}")

@@ -42,7 +42,14 @@ class uvm_factory(metaclass=utility_classes.Singleton):
     def __init__(self):
         self.fd = utility_classes.FactoryData()
         self.logger = logging.getLogger("Factory")
-        self.all_types = 1
+        self.debug_level = 1
+
+    def clear_all(self):
+        self.fd.clear_classes()
+        self.clear_overrides()
+
+    def clear_overrides(self):
+        self.fd.clear_overrides()
 
     def __set_override(self, original, override, path=None):
         if original not in self.fd.overrides:
@@ -213,13 +220,12 @@ class uvm_factory(metaclass=utility_classes.Singleton):
         :param parent_inst_path: The get_full_name path of the parent
         :param name: The name of the instance requested_type("name")
         :return: Type that is child of uvm_object.
-        Python does not create zero-length strings as defaults.
-        It puts the None object there. That's
-        what we're going to do.
+        If the type is is not in the factory we raise UVMFactoryError
         """
         new_type = self.__find_override(requested_type, parent_inst_path, name)
         if new_type is None:
-            return None
+            raise error_classes.UVMFactoryError(
+                f"{requested_type} not in uvm_factory()")
         return new_type(name)
 
     # 8.3.1.5
@@ -255,6 +261,8 @@ class uvm_factory(metaclass=utility_classes.Singleton):
         exists for inst overrides
         :param parent: The parent component
         :return: a uvm_component with the name an parent given.
+
+        If the type is is not in the factory we raise UVMFactoryError
         """
 
         if name is None:
@@ -264,7 +272,8 @@ class uvm_factory(metaclass=utility_classes.Singleton):
         new_type = self.__find_override(requested_type, parent_inst_path, name)
 
         if new_type is None:
-            return None
+            raise error_classes.UVMFactoryError(
+                f"{requested_type} not in uvm_factory()")
 
         new_comp = new_type(name, parent)
         return new_comp
@@ -374,9 +383,9 @@ class uvm_factory(metaclass=utility_classes.Singleton):
         :param type_name: string that is name of a type
         :return: boolean
         """
-        assert (isinstance(type_name,
-                           str)), "is_type_name_registered() takes a"
-        " string as its argument not {type(type_name)}"
+        assert (isinstance(type_name, str)), \
+            ("is_type_name_registered() takes a"
+             " string as its argument not {type(type_name)}")
         return type_name in self.fd.classes
 
     # 8.3.1.7.4
@@ -389,28 +398,46 @@ class uvm_factory(metaclass=utility_classes.Singleton):
         :return: boolean
         """
         assert (issubclass(uvm_type, utility_classes.uvm_void)), \
-            "is_type_registered() takes a subclass of uvm_void "
-        "as its argument not {type(uvm_type)}"
+            ("is_type_registered() takes a subclass of uvm_void "
+             "as its argument not {type(uvm_type)}")
         return uvm_type in self.fd.classes.values()
+
+    @property
+    def debug_level(self):
+        """
+        uvm_factory().debug_level = 0 : overrides
+        uvm_factory().debug_level = 1 : user defined types + above
+        uvm_factory().debug_level = 2 : uvm_* types + above
+        """
+        return self.__debug_level
+
+    @debug_level.setter
+    def debug_level(self, debug_level):
+        """
+        uvm_factory().debug_level = 0 : overrides
+        uvm_factory().debug_level = 1 : user defined types + above
+        uvm_factory().debug_level = 2 : uvm_* types + above
+        """
+        assert (0 <= debug_level <= 2), \
+            "uvm_factory().all_type must be 0, 1, or 2"
+        self.__debug_level = debug_level
 
     def __str__(self):
         """
         Returns the Pythonic string
-        Set uvm_factory().all_types to a value to control the string.
+        Set uvm_factory().debug_level to a value to control the string.
         The default is 1
 
-        uvm_factory().all_types = 0 : overrides
-        uvm_factory().all_types = 1 : user defined types + above
-        uvm_factory().all_types = 2 : uvm_* types + above
+        uvm_factory().debug_level = 0 : overrides
+        uvm_factory().debug_level = 1 : user defined types + above
+        uvm_factory().debug_level = 2 : uvm_* types + above
 
         :return: String containing factory data
         """
-        assert (0 <= self.all_types <= 2), \
-            "uvm_factory().all_type must be 0, 1, or 2"
         factory_str = "--- overrides "
-        if self.all_types != 0:
+        if self.debug_level != 0:
             factory_str += "+ user defined types "
-        if self.all_types == 2:
+        if self.debug_level == 2:
             factory_str += "+ uvm_* types "
         factory_str += "---\n\n"
 
@@ -426,33 +453,33 @@ class uvm_factory(metaclass=utility_classes.Singleton):
         uvm_list = [self.fd.classes[cls].__name__
                     for cls in self.fd.classes
                     if fnmatch.fnmatch(self.fd.classes[cls].__name__, "uvm_*")]
-        if self.all_types > 0:
+        if self.debug_level > 0:
             factory_str += "\n" + "-" * 25 + "\nUser Defined Types:\n"
             factory_str += "\n".join(user_list)
 
-        if self.all_types == 2:
+        if self.debug_level == 2:
             factory_str += "\n" + "-" * 25 + "\nUVM Types:\n"
             factory_str += "\n".join(uvm_list)
 
         return factory_str
 
     # 8.3.1.7.5
-    def print(self, all_types=1):
+    def print(self, debug_level=1):
         """
-        Prints the factory data using all_types to
-        control the amount of output. The uvm_factory().all_types
+        Prints the factory data using debug_level to
+        control the amount of output. The uvm_factory().debug_level
         variable can control this for __str__()
 
-        all_types = 0 : overrides
-        all_types = 1 : user defined types + above
-        all_types = 2 : uvm_* types + above
+        debug_level = 0 : overrides
+        debug_level = 1 : user defined types + above
+        debug_level = 2 : uvm_* types + above
 
         :return: None
         """
-        saved_all_types = self.all_types  # Avoiding a side effect
-        self.all_types = all_types
+        saved_debug_level = self.debug_level  # Avoiding a side effect
+        self.debug_level = debug_level
         print(self)
-        self.all_types = saved_all_types
+        self.debug_level = saved_debug_level
 
 # 8.3.1.8 Usage
 # All the elements of usage have been implemented in pyuvm

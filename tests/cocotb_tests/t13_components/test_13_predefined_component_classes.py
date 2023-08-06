@@ -1,3 +1,4 @@
+from pyuvm.utility_classes import Singleton
 import pyuvm_unittest
 import unittest
 from pyuvm.s13_predefined_component_classes import *
@@ -13,6 +14,7 @@ class s13_predefined_component_TestCase(pyuvm_unittest.pyuvm_TestCase):
     def setUp(self):
         super().setUp()
         ConfigDB().clear()
+        uvm_root().clear_children()
 
     def test_uvm_component_no_parent(self):
         """
@@ -38,7 +40,7 @@ class s13_predefined_component_TestCase(pyuvm_unittest.pyuvm_TestCase):
         parent = uvm_component('parent', None)
         child = uvm_component('child', parent)
         self.assertTrue('parent' in uvm_component.component_dict)
-        self.assertTrue(f'parent.child' in uvm_component.component_dict)
+        self.assertTrue('parent.child' in uvm_component.component_dict)
         self.assertTrue(parent.parent == uvm_root())
         self.assertTrue(child.parent == parent)
         self.assertEqual(list(parent.hierarchy), [parent, child])
@@ -97,7 +99,6 @@ class s13_predefined_component_TestCase(pyuvm_unittest.pyuvm_TestCase):
         child11 = uvm_component('child11', child1)
         _ = uvm_component('child111', child11)
         children = parent.get_children()
-        print(children)
         self.assertTrue(len(children) == 3)
         children = child1.get_children()
         self.assertTrue(len(children) == 1)
@@ -206,7 +207,8 @@ class s13_predefined_component_TestCase(pyuvm_unittest.pyuvm_TestCase):
         self.assertEqual(3, child3.get_depth())
 
     class my_component(uvm_component):
-        async def run_phase(self): ...
+        async def run_phase(self):
+            ...
 
     def test_component_factory(self):
         mc = self.my_component('mc', None)
@@ -282,12 +284,32 @@ class s13_predefined_component_TestCase(pyuvm_unittest.pyuvm_TestCase):
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("test")
+        await uvm_root().run_test("test", keep_singletons=True)
         utt = uvm_root().get_child("uvm_test_top")
-        self.assertEqual(uvm_active_passive_enum.UVM_ACTIVE, utt.agent.get_is_active())
-        self.assertEqual(uvm_active_passive_enum.UVM_PASSIVE, utt.agent.bot.get_is_active())
+        self.assertEqual(uvm_active_passive_enum.UVM_ACTIVE,
+                         utt.agent.get_is_active())
+        self.assertEqual(uvm_active_passive_enum.UVM_PASSIVE,
+                         utt.agent.bot.get_is_active())
         self.assertTrue(utt.agent.active())
         self.assertFalse(utt.agent.bot.active())
+
+    async def test_class_as_run_test_argument(self):
+        class DataHolder(metaclass=Singleton):
+            def __init__(self):
+                self.call_count = 0
+
+            def __str__(self):
+                return f"DataHolder.call_count: {self.call_count}"
+
+        class MyTest(uvm_test):
+            async def run_phase(self):
+                self.raise_objection()
+                DataHolder().call_count += 1
+                self.drop_objection()
+
+        await uvm_root().run_test("MyTest", keep_set={DataHolder})
+        await uvm_root().run_test(MyTest, keep_set={DataHolder})
+        self.assertTrue(DataHolder().call_count == 2)
 
     async def test_default_agent_config(self):
         class bottom(uvm_agent):
@@ -307,10 +329,12 @@ class s13_predefined_component_TestCase(pyuvm_unittest.pyuvm_TestCase):
                 self.raise_objection()
                 self.drop_objection()
 
-        await uvm_root().run_test("test")
+        await uvm_root().run_test("test", keep_singletons=True)
         utt = uvm_root().get_child("uvm_test_top")
-        self.assertEqual(uvm_active_passive_enum.UVM_ACTIVE, utt.agent.get_is_active())
-        self.assertEqual(uvm_active_passive_enum.UVM_ACTIVE, utt.agent.bot.get_is_active())
+        self.assertEqual(uvm_active_passive_enum.UVM_ACTIVE,
+                         utt.agent.get_is_active())
+        self.assertEqual(uvm_active_passive_enum.UVM_ACTIVE,
+                         utt.agent.bot.get_is_active())
         self.assertTrue(utt.agent.active())
         self.assertTrue(utt.agent.bot.active())
 

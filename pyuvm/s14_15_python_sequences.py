@@ -125,7 +125,7 @@ class ResponseQueue(UVMQueue):
                     return txn_list[0]
 
     def __str__(self):
-        return str([str(xx) for xx in self.queue])
+        return str([str(xx) for xx in self._queue])
 
 
 class uvm_sequence_item(uvm_transaction):
@@ -138,6 +138,7 @@ class uvm_sequence_item(uvm_transaction):
         super().__init__(name)
         self.start_condition = CocotbEvent()
         self.finish_condition = CocotbEvent()
+        self.item_ready = CocotbEvent()
         self.parent_sequence_id = None
         self.response_id = None
 
@@ -191,6 +192,9 @@ class uvm_seq_item_export(uvm_blocking_put_export):
             raise error_classes.UVMSequenceError(
                 "You must call item_done() before calling get_next_item again")
         self.current_item = await self.req_q.get()
+        self.current_item.start_condition.set()
+        self.current_item.start_condition.clear()
+        await self.current_item.item_ready.wait()
         return self.current_item
 
     def item_done(self, rsp=None):
@@ -203,7 +207,6 @@ class uvm_seq_item_export(uvm_blocking_put_export):
         if self.current_item is None:
             raise error_classes.UVMSequenceError(
                 "You must call get_next_item before calling item_done")
-
         self.current_item.finish_condition.set()
         self.current_item.finish_condition.clear()
         self.current_item = None
@@ -221,9 +224,9 @@ class uvm_seq_item_export(uvm_blocking_put_export):
         return datum
 
 
-class uvm_seq_item_port(uvm_blocking_put_port):
+class uvm_seq_item_port(uvm_port_base):
     def connect(self, export):
-        self.check_export(export, uvm_seq_item_export)
+        self.check_export(export)
         super().connect(export)
 
     async def put_req(self, item):
@@ -237,7 +240,11 @@ class uvm_seq_item_port(uvm_blocking_put_port):
     async def get_next_item(self):
         """get the next sequence item from the request queue
         """
-        return await self.export.get_next_item()
+        try:
+            return await self.export.get_next_item()
+        except AttributeError:
+            assert self.export is not None, "export is not connected"
+            raise
 
     def item_done(self, rsp=None):
         """Notify finish_item that the item is complete"""
@@ -278,15 +285,15 @@ class uvm_sequencer(uvm_component):
     async def run_phase(self):
         while True:
             next_item = await self.seq_q.get()
-            next_item.start_condition.set()
-            next_item.start_condition.clear()
+            await self.seq_item_export.put_req(next_item)
 
     async def start_item(self, item):
         await self.seq_q.put(item)
         await item.start_condition.wait()
 
     async def finish_item(self, item):
-        await self.seq_item_export.put_req(item)
+        item.item_ready.set()
+        item.item_ready.clear()
         await item.finish_condition.wait()
 
     async def put_req(self, req):
@@ -310,7 +317,7 @@ class uvm_sequence(uvm_object):
     body() gets launched in a thread at start.
     """
 
-    def __init__(self, name):
+    def __init__(self, name="uvm_sequence"):
         super().__init__(name)
         self.sequencer = None
         self.running_item = None
@@ -351,11 +358,12 @@ class uvm_sequence(uvm_object):
                 f" sequence: {self.get_full_name()}")
         await self.sequencer.finish_item(item)
 
-    async def get_response(self):
+    async def get_response(self, transaction_id=None):
         if self.sequencer is None:
             raise error_classes.UVMSequenceError(
                 "Tried to do get_response in a virtual "
                 f"sequence: {self.get_full_name()}")
-        datum = await self.sequencer.get_response(
-            self.running_item.response_id)
+        tran_id = transaction_id if transaction_id is not None \
+            else self.running_item.transaction_id
+        datum = await self.sequencer.get_response(tran_id)
         return datum

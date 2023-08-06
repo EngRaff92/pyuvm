@@ -2,11 +2,13 @@ from collections import OrderedDict
 import logging
 import fnmatch
 import cocotb.queue
-from cocotb.triggers import Event
+from cocotb.triggers import Event, NullTrigger
 from cocotb.queue import QueueEmpty
 
 FIFO_DEBUG = 5
+PYUVM_DEBUG = 4
 logging.addLevelName(FIFO_DEBUG, "FIFO_DEBUG")
+logging.addLevelName(PYUVM_DEBUG, "PYUVM_DEBUG")
 
 
 class Singleton(type):
@@ -18,9 +20,11 @@ class Singleton(type):
         return cls._instances[cls]
 
     @classmethod
-    def clear_singletons(mcs):
-        mcs._instances.clear()
-        pass
+    def clear_singletons(cls, keep):
+        classes = list(cls._instances.keys())
+        for del_cls in classes:
+            if del_cls not in keep:
+                del (cls._instances[del_cls])
 
 
 class Override:
@@ -215,21 +219,36 @@ class ObjectionHandler(metaclass=Singleton):
             ss += f"{self.__objections[cc]}\n"
         return ss
 
+    def clear(self):
+        if len(self.__objections) != 0:
+            logging.warning("Clearing objections raised by %s",
+                            ', '.join(self.__objections.values()))
+            self.__objections = {}
+        self.objection_raised = False
+
     def raise_objection(self, raiser):
-        self.__objections[raiser] = raiser.get_full_name()
+        name = raiser.get_full_name()
+        self.__objections[name] = self.__objections.setdefault(name, 0) + 1
         self.objection_raised = True
         self._objection_event.clear()
 
     def drop_objection(self, dropper):
+        name = dropper.get_full_name()
         try:
-            del self.__objections[dropper]
+            self.__objections[name] -= 1
         except KeyError:
             self.objection_raised = True
             pass
-        if len(self.__objections) == 0:
-            self._objection_event.set()
+        if self.__objections[name] == 0:
+            del self.__objections[name]
+
+            # only signal all objections done if none exist anywhere
+            if len(self.__objections) == 0:
+                self._objection_event.set()
 
     async def run_phase_complete(self):
+        # Allow the run_phase coros to get scheduled and raise objections:
+        await NullTrigger()
         if self.objection_raised:
             await self._objection_event.wait()
         else:

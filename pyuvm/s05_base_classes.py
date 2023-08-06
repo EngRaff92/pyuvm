@@ -4,10 +4,10 @@ This file defines the UVM base classes
 import sys
 
 try:
-    import copy
     import pyuvm.error_classes as error_classes
     import pyuvm.utility_classes as utility_classes
     from pyuvm.s08_factory_classes import uvm_factory
+    from cocotb.utils import get_sim_time
 except ModuleNotFoundError as mnf:
     print(mnf)
     sys.exit(1)
@@ -78,7 +78,7 @@ class uvm_object(utility_classes.uvm_void):
         Not implemented because Python can implement the factory without
         these shenanigans.
         """
-        raise error_classes.UVMNotImplemented(
+        raise error_classes.UsePythonMethod(
             'Python provides better ways to do this '
             'so the uvm_object_wrapper is unimplemented')
 
@@ -88,7 +88,7 @@ class uvm_object(utility_classes.uvm_void):
         Not implemented because Python can implement the factory without
         these shenanigans.
         """
-        raise error_classes.UVMNotImplemented(
+        raise error_classes.UsePythonMethod(
             'Python provides better ways to do this '
             'so the uvm_object_wrapper is unimplemented')
 
@@ -115,26 +115,29 @@ class uvm_object(utility_classes.uvm_void):
         uses copy.deepcopy so the user does not need to override
         do_copy()
         """
-        return copy.deepcopy(self)
+        new = self.__class__(self.get_name())
+        new.copy(self)
+        return new
 
     # 5.3.6.1
     def print(self):
         """
         Not implemented. Use __str__() and print()
         """
-        raise error_classes.UVMNotImplemented(
-            'There are better ways to do printing in Python')
+        raise error_classes.UsePythonMethod(
+            'There are better ways to do printing in Python using'
+            'print() or str()')
 
     # 5.3.6.2
     def sprint(self):
         """ Not implemented. use __str__() and print()"""
-        raise error_classes.UVMNotImplemented(
+        raise error_classes.UsePythonMethod(
             'There are better ways to do printing in Python')
 
     # 5.3.6.3
     def do_print(self):
         """ not implemented. Use __str__() and print()"""
-        raise error_classes.UVMNotImplemented(
+        raise error_classes.UsePythonMethod(
             'There are better ways to do printing in Python')
 
     # 5.3.6.4
@@ -165,20 +168,16 @@ class uvm_object(utility_classes.uvm_void):
     # 5.3.8.1
     def copy(self, rhs):
         """
-        Returns do_copy() though that just calls copy.deepcopy()
+        Copy fields from rhs to this object
         """
-        return self.do_copy(rhs)
+        self.do_copy(rhs)
 
     # 5.3.8.2
     def do_copy(self, rhs):
         """
-        Must be overridden, though copy.deepcopy() does the equivalent
-        and is a more Pythonic solution
+        Copies name. Override to copy additional data members
         """
-        raise error_classes.UsePythonMethod('Use the copy.deepcopy() '
-                                            'method to implement this to '
-                                            'support the copy module or '
-                                            'override this method.')
+        self.set_name(rhs.get_name())
 
     # 5.3.9.1
     def compare(self, rhs):
@@ -355,6 +354,9 @@ class uvm_transaction(uvm_object):
         super().__init__(name)
         self.set_initiator(initiator)
         self.transaction_id = id(self)
+        self._accept_time: int = None
+        self._begin_time: int = None
+        self._end_time: int = None
 
     def set_id_info(self, other):
         """
@@ -384,46 +386,94 @@ class uvm_transaction(uvm_object):
             'This method is not implemented at this time.')
 
     # 5.4.2.2
-    def accept_tr(self, time):
+    def accept_tr(self, accept_time=0):
         """
-        Not implemented
+        5.4.2.2
+        :param time: simulation time
         """
-        self.__not_implemented()
+        if (accept_time is not None) and (accept_time != 0):
+            self._accept_time = accept_time
+        else:
+            self._accept_time = get_sim_time()
+        # TODO Call 'accept' event pool triggers
+        self.do_accept_tr()
 
     # 5.4.2.3
     def do_accept_tr(self):
         """
-        Not implemented
+        User definable method
         """
-        self.__not_implemented()
+        pass
 
     # 5.4.2.5
-    def begin_tr(self, begin_time=0, parent_handle=None):
+    def begin_tr(self,
+                 begin_time=0,
+                 parent_handle=None) -> int:
         """
-        Not implemented
+        :param begin_time: Simulation time at which
+                           the transaction is acted upon by the driver
+        :param parent_handle:
         """
-        self.__not_implemented()
+        if (begin_time is not None) and (begin_time != 0):
+            # begin_time must be greater than or equal to accept_time
+            if begin_time < self._accept_time:
+                raise error_classes.UVMFatalError(
+                    f"""begin_time : {begin_time} is less than
+                        accept_time: {self._accept_time} for
+                        the transaction : {self.get_name()}
+                     """)
+            else:
+                self._begin_time = begin_time
+        else:
+            self._begin_time = get_sim_time()
+        # TODO: update recodring API calls
+        self.do_begin_tr()
+        # TODO Call 'begin' event pool triggers
+        # Update return value when recording is enabled
+        return 0
 
     # 5.4.2.5
     def do_begin_tr(self):
         """
-        Not implemented
+        User definable method
         """
-        self.__not_implemented()
+        pass
 
     # 5.4.2.6
-    def end_tr(self, end_time=0, free_handle=True):
+    def end_tr(self, end_time=0, free_handle=True) -> None:
         """
-        Not implemented
+        :param end_time: Simulation time at which the transaction
+                         is marked as acted upon
+        :param free_handle:
         """
-        self.__not_implemented()
+        if end_time is not None and end_time != 0:
+            # end_time must be greater than or equal to
+            # accept_time and begin_time
+            if end_time < self._accept_time:
+                raise error_classes.UVMFatalError(
+                    """end_time : {end_time} is less than
+                       accept_time : {self._accept_time}
+                       for the transaction : {self.get_name()}""")
+            elif end_time < self._begin_time:
+                raise error_classes.UVMFatalError(
+                    """end_time : {end_time} is less than
+                    accept_time : {self._begin_time}
+                    for the transaction : {self.get_name()}""")
+            else:
+                self._end_time = end_time
+        else:
+            self._end_time = get_sim_time()
+        # TODO: update recodring API calls
+        self.do_end_tr()
+        # TODO Call 'end' event pool triggers
+        # Update return value when recording is enabled
 
     # 5.4.2.7
     def do_end_tr(self):
         """
         Not implemented
         """
-        self.__not_implemented()
+        pass
 
     # 5.4.2.8
     def get_tr_handle(self):
@@ -468,25 +518,23 @@ class uvm_transaction(uvm_object):
         self.__not_implemented()
 
     # 5.4.2.16
-    def get_accept_time(self):
+    def get_accept_time(self) -> int:
         """
-        Not implemented
+        Returns the Accept time of transaction
         """
-        self.__not_implemented()
+        return self._accept_time
 
-    # 5.4.2.16
-    def get_begin_time(self):
+    def get_begin_time(self) -> int:
         """
-        Not implemented
+        Returns the Begin time of transaction
         """
-        self.__not_implemented()
+        return self._begin_time
 
-    # 5.4.2.16
-    def get_end_time(self):
+    def get_end_time(self) -> int:
         """
-        Not implemented
+        Returns the End time of transaction
         """
-        self.__not_implemented()
+        return self._end_time
 
     # 5.4.2.17
     def set_transaction_id(self, txn_id):

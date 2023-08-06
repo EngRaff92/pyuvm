@@ -44,6 +44,9 @@ class uvm_phase(uvm_object):
                 f"{comp.get_name()} is missing {method_name} function")
         method()
 
+    def __str__(self):
+        return self.__name__[4:]
+
 
 class uvm_topdown_phase(uvm_phase):
     """
@@ -91,7 +94,7 @@ class uvm_threaded_execute_phase(uvm_phase):
         except AttributeError:
             raise error_classes.UVMBadPhase(
                 f"{comp.get_name()} is missing {method_name} function")
-        cocotb.fork(method())
+        cocotb.start_soon(method())
 
 
 # 9.8 Predefined Phases
